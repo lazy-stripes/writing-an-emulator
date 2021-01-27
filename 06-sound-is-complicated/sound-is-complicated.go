@@ -1,4 +1,7 @@
 // Quick and dirty attempt at generating any sound with SDL.
+// This file is provided as example code to illustrate the following article:
+// https://blog.tigris.fr/2020/05/13/writing-an-emulator-sound-is-complicated/
+// Feel free to do whatever with it!
 
 package main
 
