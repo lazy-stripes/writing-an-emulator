@@ -267,9 +267,9 @@ func (s *SDL) HBlank() {}
 func (s *SDL) VBlank() {
 	if s.enabled {
 		s.texture.Update(
-			nil,           // Rectangle to update (here, the whole texture)
-			s.buffer,      // Our up-to-date texture buffer
-			ScreenWidth*4, // The texture buffer's "pitch" in bytes
+			nil,                          // Rectangle to update (here, the whole texture)
+			unsafe.Pointer(&s.buffer[0]), // Our up-to-date texture buffer
+			ScreenWidth*4,                // The texture buffer's "pitch" in bytes
 		)
 		s.renderer.Copy(s.texture, nil, nil)
 		s.offset = 0
@@ -970,6 +970,7 @@ type instructionSet map[uint8]instruction
 // Each supported opcode is mapped to a function taking a pointer to the CPU
 // and responsible for updating that CPU accordingly.
 var instructions = instructionSet{
+	0x00: nop,
 	0x04: incb,
 	0x05: decb,
 	0x06: ldbd8,
@@ -1000,18 +1001,23 @@ var instructions = instructionSet{
 	0x57: ldda,
 	0x67: ldha,
 	0x77: ldhla,
+	0x78: ldab,
 	0x7b: ldae,
 	0x7c: ldah,
+	0x7d: ldal,
+	0x86: addhl,
 	0x90: subb,
 	0xaf: xora,
 	0xbe: cphl,
 	0xc1: popbc,
+	0xc3: jpd16,
 	0xc5: pushbc,
 	0xc9: ret,
 	0xcd: call,
 	0xe0: ldffd8a,
 	0xe2: ldffca,
 	0xea: ldd16a,
+	0xee: xorad8,
 	0xf0: ldaffd8,
 	0xfe: cpd8,
 }
@@ -1060,9 +1066,9 @@ func ldaddrr(c *CPU, addr uint16, reg uint8) {
 
 // BIT n,r - Set CPU's Z flag to the value of bit n in register r.
 // The documentation also specifies that this instruction must:
-//  * set flag N to 0
-//  * set flag H to 1
-//  * keep flag C to its current value
+//   - set flag N to 0
+//   - set flag H to 1
+//   - keep flag C to its current value
 func bitnr(c *CPU, bit, reg uint8) {
 	if reg&(1<<bit) == 0 {
 		c.F = (c.F & ^FlagN) | FlagZ | FlagH
@@ -1223,6 +1229,11 @@ func subr(c *CPU, value uint8) {
 //
 // Individual instructions in the order they appear in the boot ROM.
 //
+
+// NOP (4 ticks)
+func nop(c *CPU) {
+	return
+}
 
 // LD SP,d16 (12 ticks)
 func ldspd16(c *CPU) {
@@ -1444,6 +1455,11 @@ func incde(c *CPU) {
 	})
 }
 
+// LD A,B (4 ticks)
+func ldab(c *CPU) {
+	c.A = c.B
+}
+
 // LD A,E (4 ticks)
 func ldae(c *CPU) {
 	c.A = c.E
@@ -1476,6 +1492,13 @@ func ldd16a(c *CPU) {
 	c.ops.Push(func(c *CPU) {
 		addr := uint16(c.tmp1) | uint16(c.tmp2)<<8
 		c.mmu.Write(addr, c.A)
+	})
+}
+
+func xorad8(c *CPU) {
+	c.ops.Push(func(c *CPU) {
+		xorr(c, c.mmu.Read(c.PC))
+		c.PC++
 	})
 }
 
@@ -1553,6 +1576,18 @@ func ldah(c *CPU) {
 	c.A = c.H
 }
 
+// LD A,L (4 ticks)
+func ldal(c *CPU) {
+	c.A = c.L
+}
+
+// ADD A,[HL] (8 ticks)
+func addhl(c *CPU) {
+	c.ops.Push(func(c *CPU) {
+		c.A += c.mmu.Read(c.HL())
+	})
+}
+
 // SUB B (4 ticks)
 func subb(c *CPU) {
 	subr(c, c.B)
@@ -1573,6 +1608,29 @@ func cphl(c *CPU) {
 	c.ops.Push(func(c *CPU) {
 		val := c.mmu.Read(c.HL())
 		cp(c, val) // Ignore result, we only want to set CPU flags.
+	})
+}
+
+// JP d16 (16 ticks)
+func jpd16(c *CPU) {
+	// We need PC to read the two address bytes following the opcode. This is
+	// where we need two temporary registers.
+
+	// Read the first (low) address byte (4 ticks).
+	c.ops.Push(func(c *CPU) {
+		c.tmp1 = c.mmu.Read(c.PC)
+		c.PC++
+	})
+
+	// Read the second (high) address byte (4 ticks).
+	c.ops.Push(func(c *CPU) {
+		c.tmp2 = c.mmu.Read(c.PC)
+		c.PC++
+	})
+
+	// Update PC with address to jump to.
+	c.ops.Push(func(c *CPU) {
+		c.PC = uint16(c.tmp2)<<8 | uint16(c.tmp1)
 	})
 }
 
