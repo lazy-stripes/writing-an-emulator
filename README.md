@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> This repository is deprecated! Its contents now live in a more generic repo with a slightly larger scope: https://github.com/lazy-stripes/blog-code/tree/main/writing-an-emulator/.
+
 # Writing an emulator: example code
 
 This repository contains example programs that are part of a series of blog articles about writing a Game Boy emulator.
